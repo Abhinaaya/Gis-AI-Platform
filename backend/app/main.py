@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-import geopandas as gpd
+from app.routes.gis_routes import router as gis_router
 
 app = FastAPI()
 
@@ -7,11 +7,4 @@ app = FastAPI()
 def home():
     return {"message": "GIS AI Platform Running"}
 
-@app.get("/geo-data")
-def get_geo_data():
-
-    gdf = gpd.read_file("../data/sample.geojson")
-    import json
-
-    return json.loads(gdf.to_json())
-
+app.include_router(gis_router)
