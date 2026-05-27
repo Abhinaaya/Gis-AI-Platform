@@ -3,7 +3,9 @@ import geopandas as gpd
 from shapely.geometry import Point
 import json
 import os
-
+from sqlalchemy.orm import Session
+from app.database import SessionLocal
+from sqlalchemy import text
 router = APIRouter()
 
 # ✅ Path goes up 3 levels: routes → app → backend → GIS-AI-Platform → data
@@ -136,11 +138,36 @@ def inside_ghmc(lat: float, lon: float):
     return {"status": "OUTSIDE GHMC"}
 
 @router.get("/flood-points")
-def flood_points():
-    flood_gdf = load_flood_data()
-    non_geom_cols = [c for c in flood_gdf.columns if c != "geometry"]
-    flood_gdf[non_geom_cols] = flood_gdf[non_geom_cols].astype(str)
-    return json.loads(flood_gdf.to_json())
+def get_flood_points():
+
+    db: Session = SessionLocal()
+
+    query = text("""
+        SELECT
+            id,
+            location_name,
+            risk_level,
+            ST_Y(geom) AS lat,
+            ST_X(geom) AS lon
+        FROM flood_points
+    """)
+
+    result = db.execute(query)
+
+    points = []
+
+    for row in result:
+        points.append({
+            "id": row.id,
+            "location": row.location_name,
+            "risk": row.risk_level,
+            "lat": row.lat,
+            "lon": row.lon
+        })
+
+    db.close()
+
+    return points
 
 
 @router.get("/flood-data")
@@ -210,5 +237,48 @@ def analyze_risk(lat: float, lon: float):
         "risk": risk,
         "nearest_flood_point": nearest_location,
         "distance": round(min_distance, 5)
+    }
+@router.get("/nearest-flood")
+def nearest_flood(lat: float, lon: float):
+
+    db: Session = SessionLocal()
+
+    query = text("""
+        SELECT
+            id,
+            location_name,
+            risk_level,
+
+            ST_Distance(
+                geom::geography,
+                ST_SetSRID(
+                    ST_MakePoint(:lon, :lat),
+                    4326
+                )::geography
+            ) AS distance
+
+        FROM flood_points
+
+        ORDER BY distance
+
+        LIMIT 1
+    """)
+
+    result = db.execute(
+        query,
+        {
+            "lat": lat,
+            "lon": lon
+        }
+    )
+
+    row = result.fetchone()
+
+    db.close()
+
+    return {
+        "nearest_location": row.location_name,
+        "risk_level": row.risk_level,
+        "distance_meters": round(row.distance, 2)
     }
 

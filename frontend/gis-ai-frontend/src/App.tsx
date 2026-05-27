@@ -7,173 +7,168 @@ import {
   TileLayer,
   useMapEvents,
 } from "react-leaflet";
+
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-type GeoJsonData = Parameters<typeof GeoJSON>[0]["data"];
+type GeoJsonData = any;
 
-delete (L.Icon.Default.prototype as { _getIconUrl?: unknown })._getIconUrl;
+delete (L.Icon.Default.prototype as any)._getIconUrl;
 
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  iconRetinaUrl:
+    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  iconUrl:
+    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  shadowUrl:
+    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-type ClickResult = {
-  lat: number;
-  lon: number;
-  status: string;
-  region: string;
-  risk: string;
-  nearestFloodPoint: string;
-  distance: number | null;
-};
-
-function ClickHandler({
-  setClickData,
+function LocationMarker({
+  setRiskInfo,
 }: {
-  setClickData: React.Dispatch<React.SetStateAction<ClickResult | null>>;
+  setRiskInfo: any;
 }) {
-  useMapEvents({
+  const [position, setPosition] =
+    useState<L.LatLng | null>(null);
+
+  const map = useMapEvents({
     async click(e) {
       const lat = e.latlng.lat;
       const lon = e.latlng.lng;
 
+      setPosition(e.latlng);
+
       try {
-        const [ghmcResponse, riskResponse] = await Promise.all([
-          fetch(`http://127.0.0.1:8000/inside-ghmc?lat=${lat}&lon=${lon}`),
-          fetch(`http://127.0.0.1:8000/analyze-risk?lat=${lat}&lon=${lon}`),
-        ]);
+        const response = await fetch(
+          `http://127.0.0.1:8000/nearest-flood?lat=${lat}&lon=${lon}`
+        );
 
-        const ghmcData = await ghmcResponse.json();
-        const riskData = await riskResponse.json();
+        const data = await response.json();
 
-        setClickData({
-          lat,
-          lon,
-          status: ghmcData.status ?? "UNKNOWN",
-          region: ghmcData.region_name ?? "N/A",
-          risk: riskData.risk ?? "LOW",
-          nearestFloodPoint: riskData.nearest_flood_point ?? "Unknown",
-          distance:
-            typeof riskData.distance === "number" ? riskData.distance : null,
-        });
-      } catch (err) {
-        console.error("Fetch failed:", err);
+        setRiskInfo(data);
+      } catch (error) {
+        console.error(error);
       }
+
+      map.flyTo(e.latlng, map.getZoom());
     },
   });
 
-  return null;
+  return position === null ? null : (
+    <Marker position={position}>
+      <Popup>You clicked here</Popup>
+    </Marker>
+  );
 }
 
-function App() {
+export default function App() {
   const [geoData, setGeoData] = useState<GeoJsonData | null>(null);
-  const [floodData, setFloodData] = useState<GeoJsonData | null>(null);
-  const [clickData, setClickData] = useState<ClickResult | null>(null);
+
+  const [floodPoints, setFloodPoints] =
+    useState<any[]>([]);
+
+  const [riskInfo, setRiskInfo] =
+    useState<any>(null);
 
   useEffect(() => {
     fetch("http://127.0.0.1:8000/geo-data")
       .then((res) => res.json())
-      .then((data) => {
-        if (data.type === "FeatureCollection" && Array.isArray(data.features)) {
-          setGeoData(data);
-          return;
-        }
+      .then((data) => setGeoData(data));
 
-        console.error("Invalid GHMC GeoJSON");
-      })
-      .catch((err) => {
-        console.error("Error loading GHMC data:", err);
-      });
-  }, []);
-
-  useEffect(() => {
-    fetch("http://127.0.0.1:8000/flood-data")
+    fetch("http://127.0.0.1:8000/flood-points")
       .then((res) => res.json())
-      .then((data) => {
-        if (data.type === "FeatureCollection" && Array.isArray(data.features)) {
-          setFloodData(data);
-          return;
-        }
-
-        console.error("Invalid Flood GeoJSON");
-      })
-      .catch((err) => {
-        console.error("Error loading flood data:", err);
-      });
+      .then((data) => setFloodPoints(data));
   }, []);
 
   return (
-    <MapContainer
-      center={[17.385, 78.486]}
-      zoom={10}
-      style={{ height: "100vh", width: "100%" }}
-    >
-      <TileLayer
-        attribution='&copy; OpenStreetMap contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-
-      {geoData && (
-        <GeoJSON
-          data={geoData}
-          style={() => ({
-            color: "blue",
-            fillOpacity: 0,
-            weight: 4,
-          })}
-          onEachFeature={(feature, layer) => {
-            layer.bindPopup(
-              `<b>Region:</b> ${feature.properties?.name || "Unknown"}`
-            );
-          }}
+    <div
+  style={{
+    width: "100vw",
+    height: "100vh",
+  }}
+>
+      <MapContainer
+        center={[17.385, 78.4867]}
+        zoom={10}
+        style={{
+          height: "100%",
+          width: "100%",
+        }}
+      >
+        <TileLayer
+          attribution="OpenStreetMap"
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-      )}
 
-      {floodData && (
-        <GeoJSON
-          data={floodData}
-          pointToLayer={(_, latlng) => L.marker(latlng)}
-          onEachFeature={(feature, layer) => {
-            layer.bindPopup(`
-              <b>Flood Point</b>
-              <br/><br/>
-              <b>Location:</b> ${feature.properties?.Name || "Unknown"}
-              <br/><br/>
-              <b>Flood Risk:</b> High
-            `);
-          }}
+        {geoData && (
+          <GeoJSON
+            data={geoData}
+            style={{
+              color: "blue",
+              weight: 2,
+            }}
+          />
+        )}
+
+        {floodPoints.map((point, index) => (
+          <Marker
+            key={index}
+            position={[
+              point.lat,
+              point.lon,
+            ]}
+          >
+            <Popup>
+              <div>
+                <h3>{point.location}</h3>
+
+                <p>
+                  Risk:
+                  {point.risk}
+                </p>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+
+        <LocationMarker
+          setRiskInfo={setRiskInfo}
         />
-      )}
+      </MapContainer>
 
-      <ClickHandler setClickData={setClickData} />
+      {riskInfo && (
+        <div
+          style={{
+            position: "absolute",
+            top: 20,
+            right: 20,
+            zIndex: 1000,
+            background: "white",
+            padding: "15px",
+            borderRadius: "10px",
+            boxShadow:
+              "0px 0px 10px rgba(0,0,0,0.2)",
+          }}
+        >
+          <h2>Nearest Flood Point</h2>
 
-      {clickData && (
-        <Marker position={[clickData.lat, clickData.lon]}>
-          <Popup>
-            <b>Latitude:</b> {clickData.lat.toFixed(5)}
-            <br />
-            <b>Longitude:</b> {clickData.lon.toFixed(5)}
-            <br />
-            <b>Status:</b> {clickData.status}
-            <br />
-            <b>Region:</b> {clickData.region}
-            <br />
-            <b>Flood Risk:</b> {clickData.risk}
-            <br />
-            <b>Nearest Flood Point:</b> {clickData.nearestFloodPoint}
-            <br />
-            <b>Distance:</b>{" "}
-            {clickData.distance === null
-              ? "N/A"
-              : clickData.distance.toFixed(5)}
-          </Popup>
-        </Marker>
+          <p>
+            Location:
+            {riskInfo.nearest_location}
+          </p>
+
+          <p>
+            Risk:
+            {riskInfo.risk_level}
+          </p>
+
+          <p>
+            Distance:
+            {riskInfo.distance_meters} meters
+          </p>
+        </div>
       )}
-    </MapContainer>
+    </div>
   );
 }
-
-export default App;
